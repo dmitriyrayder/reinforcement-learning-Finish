@@ -267,9 +267,9 @@ class SimpleRLAgent:
                 state = next_state
             
             rewards_history.append(total_reward)
-            
-            # Обновление прогресса
-            progress_bar.progress((episode + 1) / episodes)
+
+            # Обновление прогресса (ограничиваем диапазон [0.0, 1.0])
+            progress_bar.progress(min(1.0, (episode + 1) / episodes))
             status_text.text(f"Эпизод {episode + 1}/{episodes} | Награда: {total_reward:.2f}")
         
         progress_bar.empty()
@@ -598,8 +598,8 @@ class StreamlitCallback(BaseCallback):
         self.current_episode_reward = 0
     
     def _on_step(self):
-        # Обновление прогресса
-        progress = self.num_timesteps / self.total_timesteps
+        # Обновление прогресса (ограничиваем диапазон [0.0, 1.0])
+        progress = min(1.0, self.num_timesteps / self.total_timesteps)
         self.progress_bar.progress(progress)
         
         # Накопление награды

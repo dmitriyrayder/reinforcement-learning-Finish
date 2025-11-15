@@ -22,6 +22,10 @@ try:
 except ImportError:
     SB3_AVAILABLE = False
 
+# ============================================================================
+# РАЗДЕЛ 1: ПОДГОТОВКА ДАННЫХ И БАЗОВАЯ RL СРЕДА
+# ============================================================================
+
 # Настройка страницы
 st.set_page_config(page_title="RL Система для Оптики", layout="wide")
 
@@ -55,8 +59,8 @@ def load_and_prepare_data(uploaded_file):
     df['Cost'] = df['Price'] * np.random.uniform(0.6, 0.8, len(df))
     df['Cost'] = df['Cost'].round(2)
     
-    # Маржа
-    df['Margin'] = df['Sum'] - (df['Cost'] * df['Qty'])
+    # Маржа (правильная формула: (Цена - Себестоимость) * Количество)
+    df['Margin'] = (df['Price'] - df['Cost']) * df['Qty']
     
     # Уникальные магазины
     stores = df['Magazin'].unique()
@@ -274,7 +278,7 @@ class SimpleRLAgent:
         return rewards_history
 
 # ============================================================================
-# ПРОДВИНУТАЯ RL СИСТЕМА
+# РАЗДЕЛ 2: ПРОДВИНУТАЯ RL СИСТЕМА
 # ============================================================================
 
 class AdvancedRetailEnvironment(gym.Env):
@@ -687,7 +691,7 @@ class MultiAgentSystem:
         return results
 
 # ============================================================================
-# МОДУЛЬ АНАЛИТИКИ И РЕКОМЕНДАЦИЙ
+# РАЗДЕЛ 3: МОДУЛЬ АНАЛИТИКИ И РЕКОМЕНДАЦИЙ
 # ============================================================================
 
 class BusinessAnalytics:
@@ -706,14 +710,24 @@ class BusinessAnalytics:
         
         product_revenue = product_revenue.sort_values('Sum', ascending=False)
         product_revenue['Revenue_Cumsum'] = product_revenue['Sum'].cumsum()
-        product_revenue['Revenue_Percent'] = product_revenue['Revenue_Cumsum'] / product_revenue['Sum'].sum() * 100
-        
-        # Классификация ABC
-        product_revenue['ABC_Category'] = pd.cut(
-            product_revenue['Revenue_Percent'],
-            bins=[0, 80, 95, 100],
-            labels=['A', 'B', 'C']
-        )
+        total_revenue = product_revenue['Sum'].sum()
+
+        if total_revenue > 0:
+            product_revenue['Revenue_Percent'] = product_revenue['Revenue_Cumsum'] / total_revenue * 100
+
+            # Правильная классификация ABC: A = первые 80%, B = 80-95%, C = 95-100%
+            def assign_abc(percent):
+                if percent <= 80:
+                    return 'A'
+                elif percent <= 95:
+                    return 'B'
+                else:
+                    return 'C'
+
+            product_revenue['ABC_Category'] = product_revenue['Revenue_Percent'].apply(assign_abc)
+        else:
+            product_revenue['Revenue_Percent'] = 0
+            product_revenue['ABC_Category'] = 'C'
         
         return product_revenue
     
@@ -727,15 +741,30 @@ class BusinessAnalytics:
         
         store_revenue = store_revenue.sort_values('Sum', ascending=False)
         store_revenue['Revenue_Cumsum'] = store_revenue['Sum'].cumsum()
-        store_revenue['Revenue_Percent'] = store_revenue['Revenue_Cumsum'] / store_revenue['Sum'].sum() * 100
-        
-        store_revenue['ABC_Category'] = pd.cut(
-            store_revenue['Revenue_Percent'],
-            bins=[0, 80, 95, 100],
-            labels=['A', 'B', 'C']
-        )
-        
-        store_revenue['Margin_Percent'] = (store_revenue['Margin'] / store_revenue['Sum'] * 100).round(2)
+        total_revenue = store_revenue['Sum'].sum()
+
+        if total_revenue > 0:
+            store_revenue['Revenue_Percent'] = store_revenue['Revenue_Cumsum'] / total_revenue * 100
+
+            # Правильная классификация ABC: A = первые 80%, B = 80-95%, C = 95-100%
+            def assign_abc(percent):
+                if percent <= 80:
+                    return 'A'
+                elif percent <= 95:
+                    return 'B'
+                else:
+                    return 'C'
+
+            store_revenue['ABC_Category'] = store_revenue['Revenue_Percent'].apply(assign_abc)
+        else:
+            store_revenue['Revenue_Percent'] = 0
+            store_revenue['ABC_Category'] = 'C'
+
+        # Безопасный расчет процента маржи (защита от деления на ноль)
+        store_revenue['Margin_Percent'] = store_revenue.apply(
+            lambda row: (row['Margin'] / row['Sum'] * 100) if row['Sum'] > 0 else 0,
+            axis=1
+        ).round(2)
         
         return store_revenue
     
@@ -1057,18 +1086,30 @@ class CategoryManagerAnalytics:
                             'Margin_Total', 'Margin_Avg', 'Qty_Total', 'Unique_Products']
         cat_perf = cat_perf.reset_index()
         
-        # Доля в общей выручке
+        # Доля в общей выручке (защита от деления на ноль)
         total_revenue = cat_perf['Revenue_Total'].sum()
-        cat_perf['Revenue_Share_%'] = (cat_perf['Revenue_Total'] / total_revenue * 100).round(2)
-        
-        # Маржинальность
-        cat_perf['Margin_%'] = (cat_perf['Margin_Total'] / cat_perf['Revenue_Total'] * 100).round(2)
-        
-        # Средний чек
-        cat_perf['Avg_Check'] = (cat_perf['Revenue_Total'] / cat_perf['Transactions']).round(2)
-        
-        # Оборачиваемость (примерная)
-        cat_perf['Turnover_Rate'] = (cat_perf['Qty_Total'] / cat_perf['Unique_Products']).round(2)
+        if total_revenue > 0:
+            cat_perf['Revenue_Share_%'] = (cat_perf['Revenue_Total'] / total_revenue * 100).round(2)
+        else:
+            cat_perf['Revenue_Share_%'] = 0
+
+        # Маржинальность (защита от деления на ноль)
+        cat_perf['Margin_%'] = cat_perf.apply(
+            lambda row: (row['Margin_Total'] / row['Revenue_Total'] * 100) if row['Revenue_Total'] > 0 else 0,
+            axis=1
+        ).round(2)
+
+        # Средний чек (защита от деления на ноль)
+        cat_perf['Avg_Check'] = cat_perf.apply(
+            lambda row: (row['Revenue_Total'] / row['Transactions']) if row['Transactions'] > 0 else 0,
+            axis=1
+        ).round(2)
+
+        # Оборачиваемость (защита от деления на ноль)
+        cat_perf['Turnover_Rate'] = cat_perf.apply(
+            lambda row: (row['Qty_Total'] / row['Unique_Products']) if row['Unique_Products'] > 0 else 0,
+            axis=1
+        ).round(2)
         
         return cat_perf.sort_values('Revenue_Total', ascending=False)
     
@@ -1186,16 +1227,17 @@ class CategoryManagerAnalytics:
         recommendations = []
         
         cat_perf = self.category_performance()
-        
-        # Топ категория
-        top_cat = cat_perf.iloc[0]
-        recommendations.append({
-            'priority': 'ВЫСОКИЙ',
-            'category': 'Ассортиментная политика',
-            'title': f'Развитие лидера: {top_cat["Segment"]}',
-            'description': f'Доля в выручке: {top_cat["Revenue_Share_%"]:.1f}%, Маржа: {top_cat["Margin_%"]:.1f}%',
-            'action': f'Расширить ассортимент в сегменте {top_cat["Segment"]}. Добавить 10-15% новых SKU. Целевая маржа: {top_cat["Margin_%"] + 2:.1f}%'
-        })
+
+        # Топ категория (защита от пустого датафрейма)
+        if len(cat_perf) > 0:
+            top_cat = cat_perf.iloc[0]
+            recommendations.append({
+                'priority': 'ВЫСОКИЙ',
+                'category': 'Ассортиментная политика',
+                'title': f'Развитие лидера: {top_cat["Segment"]}',
+                'description': f'Доля в выручке: {top_cat["Revenue_Share_%"]:.1f}%, Маржа: {top_cat["Margin_%"]:.1f}%',
+                'action': f'Расширить ассортимент в сегменте {top_cat["Segment"]}. Добавить 10-15% новых SKU. Целевая маржа: {top_cat["Margin_%"] + 2:.1f}%'
+            })
         
         # Низкомаржинальные
         low_margin = cat_perf[cat_perf['Margin_%'] < 25]
@@ -1266,20 +1308,22 @@ class RecommendationEngine:
                 'action': f"Провести аудит магазинов: {', '.join(c_stores.head(3)['Magazin'].tolist())}. Рассмотреть оптимизацию или изменение формата."
             })
         
-        # 2. Анализ сегментов
+        # 2. Анализ сегментов (защита от пустого датафрейма)
         segments = self.analytics.segment_analysis()
-        top_segment = segments.iloc[0]
+        if len(segments) > 0:
+            top_segment = segments.iloc[0]
+
+            recommendations.append({
+                'priority': 'ВЫСОКИЙ',
+                'category': 'Ассортиментная политика',
+                'title': f'Развитие сегмента "{top_segment["Segment"]}"',
+                'description': f"Лидирующий сегмент дает {top_segment['Revenue_Share_%']:.1f}% выручки",
+                'action': f"Расширить ассортимент в сегменте {top_segment['Segment']}. Средний чек: {top_segment['Sum_mean']:.0f} грн"
+            })
         
-        recommendations.append({
-            'priority': 'ВЫСОКИЙ',
-            'category': 'Ассортиментная политика',
-            'title': f'Развитие сегмента "{top_segment["Segment"]}"',
-            'description': f"Лидирующий сегмент дает {top_segment['Revenue_Share_%']:.1f}% выручки",
-            'action': f"Расширить ассортимент в сегменте {top_segment['Segment']}. Средний чек: {top_segment['Sum_mean']:.0f} грн"
-        })
-        
-        # 3. Анализ маржинальности
-        avg_margin = (self.df['Margin'].sum() / self.df['Sum'].sum() * 100)
+        # 3. Анализ маржинальности (защита от деления на ноль)
+        total_sum = self.df['Sum'].sum()
+        avg_margin = (self.df['Margin'].sum() / total_sum * 100) if total_sum > 0 else 0
         
         if avg_margin < 30:
             recommendations.append({
@@ -1411,10 +1455,13 @@ class RecommendationEngine:
             'finding': f"{a_products_count} товаров ({a_products_count/total_products*100:.1f}%) дают 80% выручки",
             'interpretation': f"Типичное распределение Парето. Фокус на управлении {a_products_count} топ-товарами критически важен"
         })
-        
+
         return insights
 
-# Основное приложение
+# ============================================================================
+# РАЗДЕЛ 4: ОСНОВНОЕ ПРИЛОЖЕНИЕ (STREAMLIT UI)
+# ============================================================================
+
 def main():
     # Боковая панель
     st.sidebar.header("⚙️ Настройки")
@@ -1504,8 +1551,8 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            episodes = st.slider("Количество эпизодов", 10, 500, 100)
-            horizon_days = st.slider("Горизонт планирования (дней)", 7, 90, 30)
+            episodes = st.slider("Количество эпизодов", 10, 500, 100, key="basic_episodes")
+            horizon_days = st.slider("Горизонт планирования (дней)", 7, 90, 30, key="basic_horizon")
         
         with col2:
             st.info("""
@@ -1579,7 +1626,8 @@ def main():
             total_timesteps = st.slider(
                 "Количество шагов обучения",
                 1000, 50000, 10000, step=1000,
-                help="Больше шагов = лучше качество"
+                help="Больше шагов = лучше качество",
+                key="advanced_timesteps"
             )
         
         with col3:
@@ -1594,15 +1642,16 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                horizon_days = st.slider("Горизонт планирования (дней)", 7, 90, 30)
+                horizon_days = st.slider("Горизонт планирования (дней)", 7, 90, 30, key="advanced_horizon")
                 learning_rate = st.select_slider(
                     "Learning Rate",
                     options=[0.0001, 0.0003, 0.001, 0.003, 0.01],
-                    value=0.0003
+                    value=0.0003,
+                    key="advanced_lr"
                 )
-            
+
             with col2:
-                gamma = st.slider("Gamma (discount factor)", 0.9, 0.999, 0.99, 0.001)
+                gamma = st.slider("Gamma (discount factor)", 0.9, 0.999, 0.99, 0.001, key="advanced_gamma")
                 batch_size = st.selectbox("Batch Size", [32, 64, 128, 256], index=1)
         
         # Кнопка запуска
@@ -2317,15 +2366,18 @@ def main():
             plt.tight_layout()
             st.pyplot(fig)
             
-            # Выявление пиков и спадов
-            max_month = seasonal.loc[seasonal['Sum'].idxmax(), 'Month_Name']
-            min_month = seasonal.loc[seasonal['Sum'].idxmin(), 'Month_Name']
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.success(f"🔥 **Пик продаж:** {max_month} ({seasonal['Sum'].max():,.0f} грн)")
-            with col2:
-                st.warning(f"📉 **Минимум:** {min_month} ({seasonal['Sum'].min():,.0f} грн)")
+            # Выявление пиков и спадов (защита от пустых данных)
+            if len(seasonal) > 0 and seasonal['Sum'].notna().any():
+                max_month = seasonal.loc[seasonal['Sum'].idxmax(), 'Month_Name']
+                min_month = seasonal.loc[seasonal['Sum'].idxmin(), 'Month_Name']
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.success(f"🔥 **Пик продаж:** {max_month} ({seasonal['Sum'].max():,.0f} грн)")
+                with col2:
+                    st.warning(f"📉 **Минимум:** {min_month} ({seasonal['Sum'].min():,.0f} грн)")
+            else:
+                st.warning("⚠️ Недостаточно данных для анализа сезонности")
     
     # TAB 7: Рекомендации
     with tab7:
@@ -2675,15 +2727,21 @@ def main():
                     plt.tight_layout()
                     st.pyplot(fig)
                     
-                    # Рекомендация
-                    avg_with_promo = promo_comparison[promo_comparison['promo'] == 'С промо']['mean'].values[0]
-                    avg_without = promo_comparison[promo_comparison['promo'] == 'Без промо']['mean'].values[0]
-                    
-                    if avg_with_promo > avg_without:
-                        improvement = (avg_with_promo / avg_without - 1) * 100
-                        st.success(f"✅ **Промо-акции повышают эффективность на {improvement:.1f}%!** Рекомендуется активно использовать.")
+                    # Рекомендация (защита от пустых данных и деления на ноль)
+                    with_promo = promo_comparison[promo_comparison['promo'] == 'С промо']['mean'].values
+                    without_promo = promo_comparison[promo_comparison['promo'] == 'Без промо']['mean'].values
+
+                    if len(with_promo) > 0 and len(without_promo) > 0:
+                        avg_with_promo = with_promo[0]
+                        avg_without = without_promo[0]
+
+                        if avg_with_promo > avg_without and avg_without > 0:
+                            improvement = (avg_with_promo / avg_without - 1) * 100
+                            st.success(f"✅ **Промо-акции повышают эффективность на {improvement:.1f}%!** Рекомендуется активно использовать.")
+                        else:
+                            st.warning("⚠️ Промо-акции показывают смешанные результаты. Требуется пересмотр стратегии.")
                     else:
-                        st.warning("⚠️ Промо-акции показывают смешанные результаты. Требуется пересмотр стратегии.")
+                        st.warning("⚠️ Недостаточно данных для анализа эффективности промо-акций")
                     
                     # Топ магазины для промо
                     st.markdown("### 🎯 Рекомендуемые магазины для промо-акций")
